@@ -18,7 +18,6 @@ import shutil
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -146,20 +145,15 @@ def run_live_distraction_lock():
     profile_path = os.path.expanduser("~/Desktop/chrome_profile_for_neuro_ai")
     if os.path.exists(profile_path):
         shutil.rmtree(profile_path)
-    
-    # 2. Configure Chrome options with the "stealth" flag.
+   
     options = webdriver.ChromeOptions()
-    
-    # This is the "Silver Bullet". It tells Chrome to hide the automation flags.
     options.add_argument("--disable-blink-features=AutomationControlled") 
-
-    # These flags create a stable, sandboxed environment.
     options.add_argument(f"--user-data-dir={profile_path}")
     options.add_argument("--profile-directory=Default")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     
-    print("Setting up Chrome browser in stealth mode...")
+    print("Setting up Chrome browser...")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     
@@ -168,7 +162,7 @@ def run_live_distraction_lock():
     
     try:
         print("Waiting for YouTube video player to be ready...")
-        video_player_element = WebDriverWait(driver, 20).until(
+        WebDriverWait(driver, 20).until(
             EC.element_to_be_clickable((By.ID, "movie_player"))
         )
         print("Player is ready.")
@@ -214,10 +208,10 @@ def run_live_distraction_lock():
                         prediction_history.append(current_state)
                         
                         if len(prediction_history) == prediction_history.maxlen:
-                            # 3. Get the most common state (majority vote)
+                            # get most common state (majority vote)
                             stable_state = Counter(prediction_history).most_common(1)[0][0]
                             
-                            # 4. Perform actions based on the STABLE state
+                            # perform actions based on STABLE state
                             if stable_state == "DISTRACTED":
                                 if not is_muted:
                                     print(f"{status_line} -> STATE STABILIZED: DISTRACTED | ACTION: Muting YouTube!")
@@ -225,7 +219,7 @@ def run_live_distraction_lock():
                                     is_muted = True
                                 else:
                                     print(f"{status_line} -> STATE STABILIZED: DISTRACTED | STATUS: Already muted.")
-                            else: # Stable state is FOCUSED
+                            else: # if 'FOCUSED'
                                 if is_muted:
                                     print(f"{status_line} -> STATE STABILIZED: FOCUSED    | ACTION: Unmuting YouTube!")
                                     driver.execute_script("document.querySelector('video').muted = false;")
