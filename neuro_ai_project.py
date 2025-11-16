@@ -5,13 +5,14 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
-from collections import deque
+from collections import deque, Counter
 import time
 import joblib
 import os
 import glob
 import re
 import serial
+import shutil
 
 # for Target Applications our group chose " Distraction Lock – browser tab auto-mutes YouTube when focus drops."
 from selenium import webdriver
@@ -19,6 +20,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # sliding window with length 8 for our ML classifier, as req.
 WINDOW_SIZE = 8
@@ -139,18 +142,46 @@ def run_live_distraction_lock():
     except FileNotFoundError as e:
         print(f"ERROR: A required file is missing: {e}. Please run the training steps first.")
         return
+    
+    profile_path = os.path.expanduser("~/Desktop/chrome_profile_for_neuro_ai")
+    if os.path.exists(profile_path):
+        shutil.rmtree(profile_path)
+    
+    # 2. Configure Chrome options with the "stealth" flag.
+    options = webdriver.ChromeOptions()
+    
+    # This is the "Silver Bullet". It tells Chrome to hide the automation flags.
+    options.add_argument("--disable-blink-features=AutomationControlled") 
 
-    print("Setting up Chrome browser...")
+    # These flags create a stable, sandboxed environment.
+    options.add_argument(f"--user-data-dir={profile_path}")
+    options.add_argument("--profile-directory=Default")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    
+    print("Setting up Chrome browser in stealth mode...")
     service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service)
+    driver = webdriver.Chrome(service=service, options=options)
+    
     print(f"Navigating to YouTube: {YOUTUBE_VIDEO_URL}")
     driver.get(YOUTUBE_VIDEO_URL)
-    time.sleep(5)
-    video_player_element = driver.find_element(By.TAG_NAME, "body")
+    
+    try:
+        print("Waiting for YouTube video player to be ready...")
+        video_player_element = WebDriverWait(driver, 20).until(
+            EC.element_to_be_clickable((By.ID, "movie_player"))
+        )
+        print("Player is ready.")
+    except Exception as e:
+        print(f"FATAL ERROR: Could not find the YouTube player on the page. {e}")
+        driver.quit()
+        return
 
     history_buffer = deque(maxlen=WINDOW_SIZE)
     is_muted = False
     
+    prediction_history = deque(maxlen=5) 
+   
     print(f"\n--- Attempting to Connect to Arduino on {ARDUINO_SERIAL_PORT}... ---")
     try:
         with serial.Serial(ARDUINO_SERIAL_PORT, ARDUINO_BAUD_RATE, timeout=1) as ser:
@@ -179,21 +210,28 @@ def run_live_distraction_lock():
                         interpreter.invoke()
                         prediction_score = interpreter.get_tensor(output_details[0]['index'])[0][0]
                         
-                        # perform corresponding actions
-                        if prediction_score < 0.5:
-                            if not is_muted:
-                                print(f"{status_line} -> Model predicts: DISTRACTED ({prediction_score:.2f}) | ACTION: Muting YouTube!")
-                                video_player_element.send_keys('m')
-                                is_muted = True
-                            else:
-                                print(f"{status_line} -> Model predicts: DISTRACTED ({prediction_score:.2f}) | STATUS: Already muted.")
-                        else:
-                            if is_muted:
-                                print(f"{status_line} -> Model predicts: FOCUSED    ({prediction_score:.2f}) | ACTION: Unmuting YouTube!")
-                                video_player_element.send_keys('m')
-                                is_muted = False
-                            else:
-                                print(f"{status_line} -> Model predicts: FOCUSED    ({prediction_score:.2f}) | STATUS: Already unmuted.")
+                        current_state = "DISTRACTED" if prediction_score < 0.5 else "FOCUSED"
+                        prediction_history.append(current_state)
+                        
+                        if len(prediction_history) == prediction_history.maxlen:
+                            # 3. Get the most common state (majority vote)
+                            stable_state = Counter(prediction_history).most_common(1)[0][0]
+                            
+                            # 4. Perform actions based on the STABLE state
+                            if stable_state == "DISTRACTED":
+                                if not is_muted:
+                                    print(f"{status_line} -> STATE STABILIZED: DISTRACTED | ACTION: Muting YouTube!")
+                                    driver.execute_script("document.querySelector('video').muted = true;")
+                                    is_muted = True
+                                else:
+                                    print(f"{status_line} -> STATE STABILIZED: DISTRACTED | STATUS: Already muted.")
+                            else: # Stable state is FOCUSED
+                                if is_muted:
+                                    print(f"{status_line} -> STATE STABILIZED: FOCUSED    | ACTION: Unmuting YouTube!")
+                                    driver.execute_script("document.querySelector('video').muted = false;")
+                                    is_muted = False
+                                else:
+                                    print(f"{status_line} -> STATE STABILIZED: FOCUSED    | STATUS: Already unmuted.")
                     else:
                         print(f"Gathering initial data ({len(history_buffer)}/{WINDOW_SIZE})...")
                 
