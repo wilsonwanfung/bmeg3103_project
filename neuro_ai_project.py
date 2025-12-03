@@ -28,7 +28,7 @@ MODEL_FILENAME = 'attention_model.h5'
 TFLITE_MODEL_FILENAME = 'attention_model.tflite'
 SCALER_FILENAME = 'data_scaler.joblib'
 YOUTUBE_VIDEO_URL = "https://www.youtube.com/watch?v=h0e2HAPTGF4&t=441s"
-ARDUINO_SERIAL_PORT = '/dev/cu.usbserial-10' 
+ARDUINO_SERIAL_PORT = '/dev/cu.usbserial-110' 
 ARDUINO_BAUD_RATE = 57600
 
 def load_and_prepare_data():
@@ -152,7 +152,7 @@ def run_live_distraction_lock():
     options.add_argument("--profile-directory=Default")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    
+   
     print("Setting up Chrome browser...")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
